@@ -3,8 +3,17 @@ import * as fs from "fs";
 import * as http from "http";
 import * as path from "path";
 
+/** Escape HTML special characters to prevent XSS in rendered output. */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 const TEMPLATE = (title: string, body: string) => `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>${title}</title>
+<html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
   body { font-family: -apple-system, system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }
   pre { background: #f4f4f4; padding: 16px; border-radius: 8px; overflow-x: auto; }
@@ -32,19 +41,37 @@ function markdownToHtml(md: string): string {
 
 function main() {
   const file = process.argv[2];
-  const port = parseInt(process.argv[3] || "3000");
+  const port = parseInt(process.argv[3] || "3000", 10);
   
   if (!file) {
-    console.log("Usage: md-preview <file.md> [port]");
-    process.exit(0);
+    console.error("Usage: md-preview <file.md> [port]");
+    process.exit(1);
+  }
+
+  if (isNaN(port) || port < 0 || port > 65535) {
+    console.error(`Invalid port: ${process.argv[3]}`);
+    process.exit(1);
   }
   
   const resolved = path.resolve(file);
+
+  if (!fs.existsSync(resolved)) {
+    console.error(`File not found: ${resolved}`);
+    process.exit(1);
+  }
+
   const server = http.createServer((req, res) => {
-    const content = fs.readFileSync(resolved, "utf-8");
-    const html = TEMPLATE(path.basename(file), markdownToHtml(content));
-    res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(html);
+    try {
+      const content = fs.readFileSync(resolved, "utf-8");
+      const html = TEMPLATE(path.basename(file), markdownToHtml(content));
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(html);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      console.error(`Error reading ${resolved}: ${message}`);
+      res.writeHead(500, { "Content-Type": "text/plain" });
+      res.end("Error reading file");
+    }
   });
   
   server.listen(port, () => {
